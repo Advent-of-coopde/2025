@@ -93,7 +93,14 @@ jobs:
           mkdir -p input && cp -r /tmp/saved_input/* input/
           cargo aoc -d ${{ needs.detect.outputs.day }} 2>&1 | tee /tmp/main_result.txt || echo "NOT_IMPLEMENTED" > /tmp/main_result.txt
 
-      - name: Compare results
+      - name: Extract branch results
+        id: extract
+        run: |
+          PR_RESULT=$(grep -E "Part [12] :" /tmp/pr_result.txt || cat /tmp/pr_result.txt)
+          echo "pr_result=$PR_RESULT" >> $GITHUB_OUTPUT
+          echo "Branch results: $PR_RESULT"
+
+      - name: Compare with main
         id: verify
         run: |
           DAY=${{ needs.detect.outputs.day }}
@@ -104,8 +111,8 @@ jobs:
             exit 0
           fi
 
-          PR_RESULT=$(grep -E "Part [12]:" /tmp/pr_result.txt || cat /tmp/pr_result.txt)
-          MAIN_RESULT=$(grep -E "Part [12]:" /tmp/main_result.txt || cat /tmp/main_result.txt)
+          PR_RESULT="${{ steps.extract.outputs.pr_result }}"
+          MAIN_RESULT=$(grep -E "Part [12] :" /tmp/main_result.txt || cat /tmp/main_result.txt)
 
           if [ "$PR_RESULT" != "$MAIN_RESULT" ]; then
             echo "Results mismatch!"
