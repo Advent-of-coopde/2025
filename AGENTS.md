@@ -1,5 +1,7 @@
 # AGENTS.md
 
+ALWAYS KEEP THIS FILE UPDATED
+
 ## Project Overview
 
 Advent of Code solutions repository optimized for performance. Solutions are written in Rust 2024 edition.
@@ -51,6 +53,8 @@ cargo build -p cli
 
 ### CLI
 
+The CLI uses libSQL for database access and rayon for parallel benchmarking.
+
 ```bash
 # Initialize the database (create tables)
 cargo run -p cli -- init
@@ -61,11 +65,17 @@ cargo run -p cli -- reset
 # List all solutions
 cargo run -p cli -- list
 
-# Run a solution and verify against expected output
+# Run a solution and verify against expected output (10 benchmark runs by default)
 cargo run -p cli -- run -y 2025 -d 1 -p 1
+
+# Run with custom number of benchmark iterations
+cargo run -p cli -- run -y 2025 -d 1 -p 1 -r 20
 
 # Run all solutions
 cargo run -p cli -- run-all
+
+# Run all with custom iterations
+cargo run -p cli -- run-all -r 5
 
 # Get input for a puzzle
 cargo run -p cli -- read-input -y 2025 -d 1 -p 1
@@ -81,7 +91,7 @@ cargo run -p cli -- read-input -y 2025 -d 1 -p 1 | \
 cargo run -p cli -- delete -y 2025 -d 1 -p 1
 ```
 
-Short args: `-y` (year), `-d` (day), `-p` (part), `-s` (solution)
+Short args: `-y` (year), `-d` (day), `-p` (part), `-s` (solution), `-r` (runs)
 
 ## Code Style Guidelines
 
@@ -92,7 +102,7 @@ Short args: `-y` (year), `-d` (day), `-p` (part), `-s` (solution)
 
 ## Testing Instructions
 
-Each solution should produce output matching the expected solution in the database. Solutions have a 1 second timeout.
+Each solution should produce output matching the expected solution in the database. Solutions have a 1 second timeout. Benchmarking runs solutions multiple times in parallel using rayon.
 
 ```bash
 # Run and verify a single solution
@@ -103,9 +113,14 @@ cargo run -p cli -- run-all
 ```
 
 Output uses colored indicators:
-- **Green** (✓): Correct solution
+- **Green** (✓): Correct solution with timing (mean ± spread)
 - **Yellow** (✗): Timeout (exceeded 1 second)
 - **Red** (✗): Build error, runtime error, or wrong answer
+
+Progress is shown during execution:
+- `{label} Compiling...`
+- `{label} Verifying...`
+- `{label} Benchmarking ({runs} runs)...`
 
 ## Security Considerations
 
