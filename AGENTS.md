@@ -92,7 +92,7 @@ Short args: `-y` (year), `-d` (day), `-p` (part), `-s` (solution)
 
 ## Testing Instructions
 
-Each solution should produce output matching the expected solution in the database:
+Each solution should produce output matching the expected solution in the database. Solutions have a 1 second timeout.
 
 ```bash
 # Run and verify a single solution
@@ -101,6 +101,11 @@ cargo run -p cli -- run -y 2025 -d 1 -p 1
 # Run and verify all solutions
 cargo run -p cli -- run-all
 ```
+
+Output uses colored indicators:
+- **Green** (✓): Correct solution
+- **Yellow** (✗): Timeout (exceeded 1 second)
+- **Red** (✗): Build error, runtime error, or wrong answer
 
 ## Security Considerations
 

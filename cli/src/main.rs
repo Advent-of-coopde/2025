@@ -1,8 +1,10 @@
 use clap::{Parser, Subcommand};
 use libsql::{Builder, Connection};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
+use tokio::time::timeout;
 
 #[derive(Parser)]
 #[command(name = "cli")]
@@ -114,15 +116,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::RunAll => {
-            let results = run_all_solutions(&conn).await?;
-            let mut failed = 0;
-            for result in &results {
-                print_run_result(result);
-                if !result.passed {
-                    failed += 1;
-                }
-            }
-            println!("\n{}/{} passed", results.len() - failed, results.len());
+            let (total, failed) = run_all_solutions(&conn).await?;
+            println!("\n{}/{} passed", total - failed, total);
             if failed > 0 {
                 std::process::exit(1);
             }
@@ -257,24 +252,30 @@ struct RunResult {
     error: Option<String>,
 }
 
+// ANSI color codes
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
+const YELLOW: &str = "\x1b[33m";
+const RESET: &str = "\x1b[0m";
+
 fn print_run_result(result: &RunResult) {
-    let status = if result.passed { "✓" } else { "✗" };
     let time_str = format!("{:.2}ms", result.duration_ms as f64);
-    
+
     if result.passed {
         println!(
-            "{} {}-{:02}-{} {} ({})",
-            status, result.year, result.day, result.part, result.actual.trim(), time_str
+            "{GREEN}✓ {}-{:02}-{} Correct ({}){RESET}",
+            result.year, result.day, result.part, time_str
         );
     } else if let Some(ref err) = result.error {
+        let is_timeout = err.contains("Timeout");
+        let color = if is_timeout { YELLOW } else { RED };
         println!(
-            "{} {}-{:02}-{} ERROR: {}",
-            status, result.year, result.day, result.part, err
+            "{color}✗ {}-{:02}-{} {}{RESET}",
+            result.year, result.day, result.part, err
         );
     } else {
         println!(
-            "{} {}-{:02}-{} expected '{}', got '{}' ({})",
-            status,
+            "{RED}✗ {}-{:02}-{} expected '{}', got '{}' ({}){RESET}",
             result.year,
             result.day,
             result.part,
@@ -315,16 +316,12 @@ async fn run_solution(
             expected,
             actual: String::new(),
             duration_ms: 0,
-            error: Some(format!(
-                "Build failed: {}",
-                String::from_utf8_lossy(&build_output.stderr)
-            )),
+            error: Some("Build error".to_string()),
         });
     }
 
     // Run the solution
-    let mut run_cmd = Command::new("cargo");
-    run_cmd
+    let mut child = tokio::process::Command::new("cargo")
         .arg("run")
         .arg("-p")
         .arg(&package_name)
@@ -332,17 +329,32 @@ async fn run_solution(
         .arg("--release")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let start = Instant::now();
-    let mut child = run_cmd.spawn()?;
+        .stderr(Stdio::piped())
+        .spawn()?;
 
     // Write input to stdin
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(input.as_bytes())?;
+        stdin.write_all(input.as_bytes()).await?;
     }
 
-    let output = child.wait_with_output()?;
+    let start = Instant::now();
+    let timeout_duration = Duration::from_secs(1);
+
+    let output = match timeout(timeout_duration, child.wait_with_output()).await {
+        Ok(result) => result?,
+        Err(_) => {
+            return Ok(RunResult {
+                year,
+                day,
+                part,
+                passed: false,
+                expected,
+                actual: String::new(),
+                duration_ms: timeout_duration.as_millis(),
+                error: Some("Timeout".to_string()),
+            });
+        }
+    };
     let duration_ms = start.elapsed().as_millis();
 
     if !output.status.success() {
@@ -354,10 +366,7 @@ async fn run_solution(
             expected,
             actual: String::new(),
             duration_ms,
-            error: Some(format!(
-                "Runtime error: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )),
+            error: Some("Runtime error".to_string()),
         });
     }
 
@@ -378,9 +387,7 @@ async fn run_solution(
 
 async fn run_all_solutions(
     conn: &Connection,
-) -> Result<Vec<RunResult>, Box<dyn std::error::Error>> {
-    let mut results = Vec::new();
-
+) -> Result<(usize, usize), Box<dyn std::error::Error>> {
     let mut rows = conn
         .query(
             "SELECT year, day, part FROM solutions ORDER BY year, day, part",
@@ -396,10 +403,14 @@ async fn run_all_solutions(
         entries.push((year, day, part));
     }
 
-    for (year, day, part) in entries {
-        let result = run_solution(conn, year, day, part).await?;
-        results.push(result);
+    let mut failed = 0;
+    for (year, day, part) in &entries {
+        let result = run_solution(conn, *year, *day, *part).await?;
+        print_run_result(&result);
+        if !result.passed {
+            failed += 1;
+        }
     }
 
-    Ok(results)
+    Ok((entries.len(), failed))
 }
